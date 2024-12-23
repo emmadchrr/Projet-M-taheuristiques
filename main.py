@@ -67,7 +67,7 @@ def constructive_knapsack(profits, weights, capacities):
 # Test the heuristic
 if __name__ == "__main__":
     # Parse the instance from the file
-    file_path = "mknapcb3.txt"
+    file_path = "instances/mknapcb3.txt"
     profits, weights, capacities = parse_instance(file_path)
 
     # Apply the constructive heuristic

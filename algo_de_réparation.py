@@ -1,5 +1,6 @@
 #%%
 import numpy as np
+import time
 
 def read_instances(file_path):
     """
@@ -113,25 +114,44 @@ def solve_mdkp_with_repair(file_path):
     Résout les instances MDKP avec une approche par réparation.
     
     :param file_path: Chemin vers le fichier contenant les instances.
-    :return: Liste des solutions réparées pour chaque instance.
+    :return: Liste des solutions réparées pour chaque instance, avec la valeur du majorant trouvé, le temps de résolution et le saut à la valeur optimale.
     """
     instances = read_instances(file_path)
     solutions = []
     
     for instance in instances:
+        start_time = time.time()
+        
         # Initialiser une solution naïve : sélectionner tous les projets
-
         initial_solution = np.ones(instance["n_projects"], dtype=int)
         
         # Réparer la solution pour qu'elle devienne faisable
         repaired_solution = repair_solution(initial_solution, instance)
         
-        solutions.append(repaired_solution)
+        # Calculer la valeur du majorant trouvé
+        majorant_value = np.dot(repaired_solution, instance["gains"])
+        
+        # Calculer le saut à la valeur optimale
+        optimal_value = instance["optimal_value"]
+        gap = abs(optimal_value - majorant_value)
+        
+        # Temps de résolution
+        resolution_time = time.time() - start_time
+        
+        solutions.append({
+            "solution": repaired_solution,
+            "majorant_value": majorant_value,
+            "resolution_time": resolution_time,
+            "gap": gap
+        })
     
     return solutions
 
 #%%
 #%%
+if __name__ == "__main__":
+    instances = read_instances("instances/mknap1.txt")
     solutions = solve_mdkp_with_repair("instances/mknap1.txt")
+    print(instances)
     print(solutions)
 #%%

@@ -1,84 +1,137 @@
+#%%
 import numpy as np
 
-def parse_instance(file_path):
+def read_instances(file_path):
     """
-    Parse an MKP instance from the given file.
-
-    Arguments:
-    file_path -- path to the file containing the instance
-
-    Returns:
-    profits -- list of profits for each project
-    weights -- 2D list where weights[i][j] is the consumption of resource i by project j
-    capacities -- list of available capacities for each resource
+    Lit les instances du problème MDKP à partir d'un fichier formaté, en ignorant les lignes vides.
+    
+    :param file_path: Chemin vers le fichier contenant les instances.
+    :return: Liste de dictionnaires représentant les instances.
     """
-    with open(file_path, 'r') as file:
-        lines = file.readlines()
+    instances = []
+    
+    with open(file_path, "r") as f:
+        lines = [line.strip() for line in f if line.strip()]  # Supprime les lignes vides et les espaces inutiles
+    
+    num_instances = int(lines[0])  # Première ligne : nombre d'instances
+    current_line = 1  # Pointeur pour lire les lignes
 
-    # Extract number of projects and resources from the first instance
-    n_projects, n_resources, _ = map(int, lines[1].split())
+    for _ in range(num_instances):
+        # Lire les informations générales de l'instance
+        try:
+            parts = list(map(float, lines[current_line].split()))
+            if len(parts) != 3:
+                raise ValueError(f"Erreur de format à la ligne {current_line + 1}: {lines[current_line]}")
+            n_projects, m_resources, optimal_value = parts
+            n_projects = int(n_projects)  # Convertir n_projects et m_resources en entier
+            m_resources = int(m_resources)
+            optimal_value = float(optimal_value)  # On garde optimal_value comme float
+        except ValueError:
+            raise ValueError(f"Erreur de format à la ligne {current_line + 1}: {lines[current_line]}")
+        
+        current_line += 1
 
-    # Extract profits
-    profits = list(map(int, lines[2].split()))
+        # Lire les gains des projets
+        gains = []
+        while len(gains) < n_projects:
+            gains.extend(map(float, lines[current_line].split()))
+            current_line += 1
+        
+        if len(gains) != n_projects:
+            raise ValueError(f"Erreur : Nombre de gains ({len(gains)}) ne correspond pas au nombre de projets ({n_projects}) après lecture des lignes nécessaires.")
+        
+        # Lire les quantités de ressources consommées par projet
+        resources_consumed = []
+        for _ in range(m_resources):
+            resource_line = []
+            while len(resource_line) < n_projects:
+                resource_line.extend(map(int, lines[current_line].split()))
+                current_line += 1
+            resources_consumed.append(resource_line)
 
-    # Extract weights (resource consumptions)
-    weights = []
-    for i in range(n_resources):
-        weights.append(list(map(int, lines[3 + i].split())))
+        # Lire les quantités de ressources disponibles
+        resources_available = list(map(int, lines[current_line].split()))
+        current_line += 1
+        
+        # Ajouter l'instance à la liste
+        instance = {
+            "n_projects": n_projects,
+            "m_resources": m_resources,
+            "optimal_value": optimal_value,
+            "gains": gains,
+            "resources_consumed": resources_consumed,
+            "resources_available": resources_available
+        }
+        instances.append(instance)
 
-    # Extract capacities
-    capacities = list(map(int, lines[3 + n_resources].split()))
+    return instances
 
-    return profits, weights, capacities
 
-def repair_heuristic_knapsack(profits, weights, capacities):
+def repair_solution(solution, instance):
     """
-    Repair heuristic with performance guarantee for multidimensional knapsack problem.
-
-    Arguments:
-    profits -- list of profits for each project
-    weights -- 2D list, where weights[i][j] is the weight of project j in dimension i
-    capacities -- list of available capacities for each dimension
-
-    Returns:
-    solution -- list indicating if each project is included (1) or not (0)
-    total_profit -- total profit of the solution
+    Répare une solution initiale pour qu'elle respecte les contraintes du MDKP.
+    
+    :param solution: Liste binaire indiquant si un projet est sélectionné (1) ou non (0).
+    :param instance: Dictionnaire contenant les données de l'instance (output de `read_instances`).
+    :return: Solution réparée respectant les contraintes.
     """
-    n_projects = len(profits)
-    n_resources = len(capacities)
+    num_projects = instance["n_projects"]
+    num_resources = instance["m_resources"]
+    optimal_value = instance["optimal_value"]
+    gains = np.array(instance["gains"])
+    resource_consumption = np.array(instance["resources_consumed"])
+    resource_availability = np.array(instance["resources_available"])
+    
+    # Vérifier la consommation actuelle
+    current_consumption = np.dot(resource_consumption, solution)
+    
+    while not np.all(current_consumption <= resource_availability):
+        # Trouver les indices des projets sélectionnés
+        selected_projects = np.where(solution == 1)[0]
+        
+        # Calculer le rapport gain / consommation pour chaque projet sélectionné
+        ratios = []
+        for project in selected_projects:
+            # Éviter la division par zéro
+            total_consumption = np.sum(resource_consumption[:, project])
+            ratio = gains[project] / total_consumption if total_consumption > 0 else 0
+            ratios.append((project, ratio))
+        
+        # Trouver le projet avec le pire ratio
+        worst_project = min(ratios, key=lambda x: x[1])[0]
+        
+        # Retirer ce projet de la solution
+        solution[worst_project] = 0
+        
+        # Recalculer la consommation
+        current_consumption = np.dot(resource_consumption, solution)
+    
+    return solution
 
-    # Initial solution: include all projects
-    solution = [1] * n_projects
-    current_weights = [sum(weights[i][j] for j in range(n_projects)) for i in range(n_resources)]
+def solve_mdkp_with_repair(file_path):
+    """
+    Résout les instances MDKP avec une approche par réparation.
+    
+    :param file_path: Chemin vers le fichier contenant les instances.
+    :return: Liste des solutions réparées pour chaque instance.
+    """
+    instances = read_instances(file_path)
+    solutions = []
+    
+    for instance in instances:
+        # Initialiser une solution naïve : sélectionner tous les projets
 
-    # Check if the initial solution is feasible
-    feasible = all(current_weights[i] <= capacities[i] for i in range(n_resources))
+        initial_solution = np.ones(instance["n_projects"], dtype=int)
+        
+        # Réparer la solution pour qu'elle devienne faisable
+        repaired_solution = repair_solution(initial_solution, instance)
+        
+        solutions.append(repaired_solution)
+    
+    return solutions
 
-    if not feasible:
-        # Sort projects by profit-to-weight ratio
-        ratios = [(profits[j] / sum(weights[i][j] for i in range(n_resources)), j) for j in range(n_projects)]
-        ratios.sort(reverse=True)
-
-        # Remove projects until the solution is feasible
-        for ratio, j in ratios:
-            if all(current_weights[i] <= capacities[i] for i in range(n_resources)):
-                break
-            solution[j] = 0
-            for i in range(n_resources):
-                current_weights[i] -= weights[i][j]
-
-    total_profit = sum(profits[j] for j in range(n_projects) if solution[j] == 1)
-
-    return solution, total_profit
-
-# Test the heuristic
-if __name__ == "__main__":
-    # Parse the instance from the file
-    file_path = "instances/mknapcb5.txt"
-    profits, weights, capacities = parse_instance(file_path)
-
-    # Apply the constructive heuristic
-    solution, total_profit = repair_heuristic_knapsack(profits, weights, capacities)
-
-    print("Solution:", solution)
-    print("Total Profit:", total_profit)
+#%%
+#%%
+    solutions = solve_mdkp_with_repair("instances/mknap1.txt")
+    print(solutions)
+#%%
